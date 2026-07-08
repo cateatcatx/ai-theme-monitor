@@ -1,0 +1,58 @@
+name: build-and-deploy
+
+on:
+  # 手动触发 (Actions 页面 "Run workflow")
+  workflow_dispatch:
+  # 推送到 main 时构建
+  push:
+    branches: [main]
+  # 定时 (UTC): 10:30 = 北京18:30; 14:00 = 北京22:00 (A股收盘+中证数据当晚更新后)
+  schedule:
+    - cron: "30 10 * * *"
+    - cron: "0 14 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个部署, 不取消进行中的
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # 拉数据 + 算指标 + 写 data.js; 数据源不可达时脚本自动回退 data/ 缓存, 不会中断构建
+      - name: Update data
+        run: python -X utf8 update_data.py
+
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp index.html data.js echarts.min.js site/
+          touch site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

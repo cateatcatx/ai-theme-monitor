@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+
+# 本地更新日志
+update.log
+
+# 构建产物 (由 GitHub Actions 生成并部署, 无需提交)
+site/

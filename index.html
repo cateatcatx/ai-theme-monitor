@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A股AI主题 · 波段监控</title>
+<script src="echarts.min.js"></script>
+<script src="data.js"></script>
+<style>
+  :root {
+    --bg: #0e1117; --panel: #161b24; --panel2: #1c2230; --line: #262d3d;
+    --text: #e8ebf2; --muted: #98a2b6; --dim: #66708a;
+    --green: #34d399; --yellow: #fbbf24; --orange: #fb923c; --red: #f87171;
+    --blue: #60a5fa; --purple: #a78bfa; --cyan: #22d3ee;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.65 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 22px 16px 70px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  h1 { font-size: 21px; margin: 0; font-weight: 650; letter-spacing: .5px; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .subtitle { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  .cards { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 950px) { .cards { grid-template-columns: 1fr 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 15px 17px; }
+  .card .k { color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+  .card .v { font-size: 30px; font-weight: 750; line-height: 1.15; }
+  .card .s { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .card .delta { font-size: 13px; font-weight: 600; margin-left: 8px; }
+  .statebox .tag { display: inline-block; padding: 3px 13px; border-radius: 999px;
+                   font-size: 16px; font-weight: 700; margin: 2px 0 8px; }
+  .statebox .advice { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+  .posline { margin-top: 8px; padding: 5px 10px; border-radius: 8px; font-size: 12.5px;
+             background: var(--panel2); border: 1px solid var(--line); }
+  .mini { display: flex; gap: 12px; margin-top: 8px; }
+  .mini div { font-size: 12px; color: var(--muted); }
+  .mini b { display: block; font-size: 16px; color: var(--text); }
+
+  .c-green { color: var(--green); } .c-yellow { color: var(--yellow); }
+  .c-orange { color: var(--orange); } .c-red { color: var(--red); }
+  .c-blue { color: var(--blue); } .c-muted { color: var(--muted); }
+  .bg-green { background: rgba(52,211,153,.16); color: var(--green); }
+  .bg-yellow { background: rgba(251,191,36,.16); color: var(--yellow); }
+  .bg-orange { background: rgba(251,146,60,.16); color: var(--orange); }
+  .bg-red { background: rgba(248,113,113,.16); color: var(--red); }
+  .bg-blue { background: rgba(96,165,250,.16); color: var(--blue); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 16px 18px; margin-bottom: 14px; }
+  .panel h2 { font-size: 15px; margin: 0 0 3px; font-weight: 650; }
+  .panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .chart { height: 330px; }
+  .chart.tall { height: 400px; }
+  .chart.short { height: 260px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 9px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  th:first-child, td:first-child { text-align: left; }
+  tr:last-child td { border-bottom: none; }
+  .chip { display: inline-block; min-width: 40px; text-align: center; padding: 1px 8px;
+          border-radius: 6px; font-weight: 700; }
+  .hot { color: var(--red); font-weight: 650; } .warm { color: var(--orange); }
+  .cool { color: var(--muted); } .good { color: var(--green); }
+  .legendnote { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .docs { font-size: 13px; color: var(--muted); line-height: 1.75; }
+  .docs b { color: var(--text); }
+  .docs li { margin-bottom: 5px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 950px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>A股 AI 主题 · 波段监控</h1>
+    <span class="meta" id="meta"></span>
+  </header>
+  <p class="subtitle">锚定指数: 中证人工智能主题(930713) · 基准: 沪深300 · 波段维度(5-20日窗口, 目标10个交易日左右的波段) · 每个交易日收盘后自动更新</p>
+  <div id="app"></div>
+</div>
+
+<script>
+const D = window.AI_MONITOR_DATA;
+const STATE_STYLE = {
+  up_healthy: { color: "#34d399", cls: "green",  band: "rgba(52,211,153,.10)" },
+  up_hot:     { color: "#fb923c", cls: "orange", band: "rgba(251,146,60,.13)" },
+  neutral:    { color: "#fbbf24", cls: "yellow", band: "rgba(251,191,36,.07)" },
+  down:       { color: "#f87171", cls: "red",    band: "rgba(248,113,113,.12)" },
+  down_cold:  { color: "#60a5fa", cls: "blue",   band: "rgba(96,165,250,.10)" },
+};
+const AX = { axisLine:{lineStyle:{color:"#3a4356"}}, axisLabel:{color:"#8a94a8", fontSize:11},
+             splitLine:{lineStyle:{color:"rgba(42,49,66,.55)"}} };
+const charts = [];
+const ZOOM_START = 58;   // 默认显示最近约10个月
+
+function scoreCls(v){ return v>=60 ? "c-green" : v>=40 ? "c-yellow" : "c-red"; }
+function tempCls(v){ return v>=80 ? "c-red" : v>=70 ? "c-orange" : v<=30 ? "c-blue" : "c-muted"; }
+function deltaTxt(v, suffix){
+  if (v === null || v === undefined) return "";
+  const sign = v >= 0 ? "+" : "";
+  const cls = v >= 0 ? "c-red" : "c-green";   // A股习惯: 红涨绿跌
+  return `<span class="delta ${cls}">${sign}${v}${suffix||""}</span>`;
+}
+
+function render() {
+  const s = D.snapshot, st = STATE_STYLE[s.state];
+  document.getElementById("meta").textContent =
+    `数据截至 ${s.date} · 页面生成 ${D.updated_at}`;
+
+  const pos = s.position;
+  const posHtml = pos
+    ? `<div class="posline">信号持仓中: <b>${pos.entry_date}</b> 入场 ${pos.entry_px.toLocaleString()}, 已持有 ${pos.hold_days} 日, 浮动 <b class="${pos.ret >= 0 ? "c-red" : "c-green"}">${pos.ret >= 0 ? "+" : ""}${pos.ret}%</b></div>`
+    : `<div class="posline cool">当前无持仓信号 · 等待下一次「方向分上穿60且温度&lt;70」的入场信号</div>`;
+
+  document.getElementById("app").innerHTML = `
+  <div class="cards">
+    <div class="card statebox">
+      <div class="k">当前状态判定 (已持续 ${s.state_run_days} 个交易日)</div>
+      <span class="tag bg-${st.cls}">${s.state_label}</span>
+      <div class="advice">${s.state_advice}</div>
+      ${posHtml}
+    </div>
+    <div class="card">
+      <div class="k">波段方向分 (0-100)</div>
+      <div class="v ${scoreCls(s.score)}">${s.score.toFixed(1)}${deltaTxt(s.score_chg5, " /5日")}</div>
+      <div class="mini">
+        <div>趋势<b>${s.trend}</b></div><div>相对动量<b>${s.momentum}</b></div><div>广度<b>${s.breadth}</b></div>
+      </div>
+      <div class="s">&ge;60 波段上行 · &lt;40 波段破位</div>
+    </div>
+    <div class="card">
+      <div class="k">波段温度 (1年分位)</div>
+      <div class="v ${tempCls(s.temp)}">${s.temp}${deltaTxt(s.temp_chg5, " /5日")}</div>
+      <div class="mini">
+        <div>拥挤<b>${s.crowd_pct}</b></div><div>涨速<b>${s.speed_pct}</b></div>
+      </div>
+      <div class="s">&ge;80 过热(止盈区) · &le;30 冰点(酝酿区) · 成交占全A ${s.share_ma5}%</div>
+    </div>
+    <div class="card">
+      <div class="k">主题指数 ${s.date.slice(5)}</div>
+      <div class="v">${s.close.toLocaleString()}${deltaTxt(s.chg_pct, "%")}</div>
+      <div class="s">10日线${s.above_ma10 ? "上方" : "<b class='c-red'>下方</b>"} · 10日乖离 ${s.bias10 >= 0 ? "+" : ""}${s.bias10}%<br>10日超额(vs300) ${s.excess10 >= 0 ? "+" : ""}${s.excess10}% · PE ${s.pe ?? "—"} (1年分位 ${s.pe_pct ?? "—"}%)</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>主题指数走势 · 状态区间 · 波段信号</h2>
+    <div class="sub">背景: <span class="c-green">绿=上行健康</span> · <span class="c-orange">橙=上行过热</span> · <span class="c-yellow">黄=转折震荡</span> · <span class="c-red">红=下行</span> · <span class="c-blue">蓝=冰点酝酿</span> &nbsp;|&nbsp; 标记: <span class="c-green">▲ 入场信号</span> · <span class="c-orange">▼ 离场信号</span></div>
+    <div class="chart tall" id="chPrice"></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" style="margin-bottom:0">
+      <h2>波段方向分 = 趋势40% + 相对动量35% + 广度25%</h2>
+      <div class="sub">10日线乖离/MA5vs10 · 10日超额vs300 · 7指数站上10日线比例</div>
+      <div class="chart short" id="chScore"></div>
+    </div>
+    <div class="panel" style="margin-bottom:0">
+      <h2>波段温度 = 拥挤60% + 涨速40%</h2>
+      <div class="sub">成交额占全A(5日平滑)分位 + 10日涨幅分位, 滚动1年</div>
+      <div class="chart short" id="chTemp"></div>
+    </div>
+  </div>
+  <div style="height:14px"></div>
+
+  <div class="grid2">
+    <div class="panel" style="margin-bottom:0">
+      <h2>相对强度 RS (vs 沪深300)</h2>
+      <div class="sub">RS = 主题指数/沪深300 (x1000) · 站上10日均线 = 波段跑赢</div>
+      <div class="chart short" id="chRS"></div>
+    </div>
+    <div class="panel" style="margin-bottom:0">
+      <h2>波段信号记录 (最近${D.trades.length}笔)</h2>
+      <div class="sub">入场: 方向分上穿60且温度&lt;70 · 离场: 方向分&lt;40 或 温度&ge;85且破10日线 · 信号日收盘价计</div>
+      <div style="overflow-x:auto; max-height: 232px; overflow-y:auto"><table>
+        <tr><th>入场</th><th>离场</th><th>持有</th><th>收益</th><th>离场原因</th></tr>
+        ${[...D.trades].reverse().map(t => `<tr>
+          <td>${t.entry_date}</td>
+          <td>${t.open ? '<span class="c-yellow">持仓中</span>' : t.exit_date}</td>
+          <td>${t.hold_days}日</td>
+          <td class="${t.ret >= 0 ? "c-red" : "c-green"}"><b>${t.ret >= 0 ? "+" : ""}${t.ret}%</b></td>
+          <td class="cool">${t.reason}</td>
+        </tr>`).join("")}
+      </table></div>
+      ${swingStatsHtml()}
+    </div>
+  </div>
+  <div style="height:14px"></div>
+
+  <div class="panel">
+    <h2>AI 产业链各环节 (波段口径: 谁在领涨 / 谁最热)</h2>
+    <div class="sub">数据截至 ${D.chain[0].date} · 全部为中证行业/主题指数 · 分位为滚动1年</div>
+    <div style="overflow-x:auto">
+    <table>
+      <tr><th>指数</th><th>收盘</th><th>日涨跌</th><th>10日线上方</th><th>10日乖离</th>
+          <th>10日超额(vs300)</th><th>成交占全A</th><th>拥挤分位</th><th>涨速分位</th></tr>
+      ${D.chain.map(r => `<tr>
+        <td><b>${r.name}</b> <span class="cool" style="font-size:11px">${r.code}</span></td>
+        <td>${r.close.toLocaleString()}</td>
+        <td class="${r.chg_pct >= 0 ? "c-red" : "c-green"}">${r.chg_pct >= 0 ? "+" : ""}${r.chg_pct.toFixed(2)}%</td>
+        <td>${r.above_ma10 ? '<span class="good">是</span>' : '<span class="c-red">否</span>'}</td>
+        <td class="${r.bias10 >= 5 ? "warm" : r.bias10 <= -5 ? "c-blue" : ""}">${r.bias10 >= 0 ? "+" : ""}${r.bias10}%</td>
+        <td class="${r.excess10 >= 0 ? "good" : "cool"}">${r.excess10 >= 0 ? "+" : ""}${r.excess10}%</td>
+        <td>${r.share_pct_of_mkt}%</td>
+        <td>${r.crowd_pct === null ? "—" : `<span class="chip ${r.crowd_pct >= 85 ? "bg-red" : r.crowd_pct >= 70 ? "bg-orange" : r.crowd_pct <= 30 ? "bg-blue" : "bg-yellow"}">${r.crowd_pct}</span>`}</td>
+        <td>${r.speed_pct === null ? "—" : `<span class="chip ${r.speed_pct >= 85 ? "bg-red" : r.speed_pct >= 70 ? "bg-orange" : r.speed_pct <= 30 ? "bg-blue" : "bg-yellow"}">${r.speed_pct}</span>`}</td>
+      </tr>`).join("")}
+    </table></div>
+    <div class="legendnote">广度子指标 = 上表7个指数中收于10日均线上方的占比。波段内切换环节时, 先看谁的10日超额和涨速在抬升。</div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel" style="margin-bottom:0">
+      <h2>状态分档的历史区分度 (未来10个交易日)</h2>
+      <div class="sub">上表 ${D.validation.sample_range}, 下表为本轮AI周期 ${D.validation.sample_range_recent}</div>
+      <table>
+        <tr><th>状态</th><th>样本天数</th><th>10日后收益</th><th>期间最大回撤</th><th>上涨占比</th></tr>
+        ${D.validation.per_state.map(r => valRow(r)).join("")}
+      </table>
+      <div style="height:10px"></div>
+      <table>
+        <tr><th>状态 (2022年以来)</th><th>样本天数</th><th>10日后收益</th><th>期间最大回撤</th><th>上涨占比</th></tr>
+        ${(D.validation.per_state_recent || []).map(r => valRow(r)).join("")}
+      </table>
+      <div class="legendnote">波段的胜负主要由信号点决定而非状态本身, 状态用于仓位与预期管理: 过热区回撤明显更深, 健康区胜率与盈亏比最好。</div>
+    </div>
+    <div class="panel" style="margin-bottom:0">
+      <h2>指标口径与用法</h2>
+      <ul class="docs">
+        <li><b>方向分(0-100):</b> 趋势40%(10日线乖离&plusmn;6%映射 + MA5&gt;MA10 + MA10向上) + 相对动量35%(10日超额收益&plusmn;8%映射为主) + 广度25%(7指数站上10日线比例)。</li>
+        <li><b>温度(0-100):</b> 拥挤60%(成交额占全A, 5日平滑, 1年分位) + 涨速40%(10日涨幅1年分位)。&ge;80过热, &le;30冰点。</li>
+        <li><b>入场信号:</b> 方向分从下方上穿60, 且当日温度&lt;70 —— 新波段启动且不追已过热的启动。</li>
+        <li><b>离场信号:</b> 方向分跌破40(波段破位), 或 温度&ge;85且收盘跌破10日线(过热破线止盈)。</li>
+        <li><b>回测画像(2019年来63笔):</b> 胜率约四成, 单笔中位约-1.3%, 但均值+2.5% —— 典型的"小亏多次、大赚几次"趋势跟随画像, 赚钱靠拿住2024/09、2025/07这类大波段, 纪律性执行离场是关键。对T+1收盘成交稳健。</li>
+        <li><b>更新机制:</b> 每个交易日17:30由计划任务自动拉取中证指数官网数据并重算; 中证官网T日数据当晚更新, 偶有延迟则显示T-1。</li>
+      </ul>
+    </div>
+  </div>`;
+
+  drawPrice(); drawScore(); drawTemp(); drawRS();
+  echarts.connect(charts);
+}
+
+function valRow(r) {
+  return `<tr>
+    <td><span style="color:${STATE_STYLE[r.state].color}">●</span> ${r.label}</td>
+    <td>${r.days}</td>
+    <td class="${r.fwd10_ret_med >= 0 ? "c-red" : "c-green"}">${r.fwd10_ret_med >= 0 ? "+" : ""}${r.fwd10_ret_med}%</td>
+    <td>${r.fwd10_dd_med}%</td><td>${r.win_rate}%</td>
+  </tr>`;
+}
+
+function swingStatsHtml() {
+  const rows = (D.swing_stats || []).filter(x => x && x.n);
+  if (!rows.length) return "";
+  return `<div style="height:10px"></div><table>
+    <tr><th>回测</th><th>笔数</th><th>胜率</th><th>单笔中位/均值</th><th>持有中位</th><th>最差/最好</th><th>累计(对数)</th></tr>
+    ${rows.map(x => `<tr>
+      <td>${x.since}年以来</td><td>${x.n}</td><td>${x.win_rate}%</td>
+      <td>${x.ret_med}% / <b class="${x.ret_avg >= 0 ? "c-red" : "c-green"}">${x.ret_avg >= 0 ? "+" : ""}${x.ret_avg}%</b></td>
+      <td>${x.hold_med}日</td><td>${x.worst}% / +${x.best}%</td>
+      <td><b>${x.ret_sum >= 0 ? "+" : ""}${x.ret_sum}%</b></td>
+    </tr>`).join("")}
+  </table>`;
+}
+
+// 把逐日state压缩成连续区间, 生成markArea
+function stateBands() {
+  const st = D.series.state, dates = D.series.dates, out = [];
+  let cur = null, start = 0;
+  for (let i = 0; i <= st.length; i++) {
+    const v = i < st.length ? st[i] : null;
+    if (v !== cur) {
+      if (cur !== null && STATE_STYLE[cur])
+        out.push([{ xAxis: dates[start], itemStyle: { color: STATE_STYLE[cur].band } },
+                  { xAxis: dates[i - 1] }]);
+      cur = v; start = i;
+    }
+  }
+  return out;
+}
+
+function mkChart(id, opt) {
+  const el = document.getElementById(id);
+  const c = echarts.init(el, null, { renderer: "canvas" });
+  opt.backgroundColor = "transparent";
+  opt.animation = false;
+  opt.tooltip = Object.assign({
+    trigger: "axis", backgroundColor: "#1c2230", borderColor: "#262d3d",
+    textStyle: { color: "#e8ebf2", fontSize: 12 },
+    axisPointer: { type: "cross", label: { backgroundColor: "#2a3245" } },
+  }, opt.tooltip || {});
+  c.setOption(opt);
+  charts.push(c);
+  window.addEventListener("resize", () => c.resize());
+  return c;
+}
+
+function xAxis() {
+  return Object.assign({ type: "category", data: D.series.dates, boundaryGap: false }, AX);
+}
+function zoom() {
+  return [
+    { type: "inside", start: ZOOM_START, end: 100 },
+    { type: "slider", start: ZOOM_START, end: 100, height: 16, bottom: 4,
+      borderColor: "#262d3d", backgroundColor: "rgba(28,34,48,.5)",
+      fillerColor: "rgba(96,165,250,.15)", handleStyle: { color: "#60a5fa" },
+      textStyle: { color: "#66708a", fontSize: 10 } },
+  ];
+}
+
+function drawPrice() {
+  const entries = D.markers.filter(m => m.type === "entry").map(m => [m.date, m.px]);
+  const exits = D.markers.filter(m => m.type === "exit").map(m => [m.date, m.px]);
+  mkChart("chPrice", {
+    grid: { left: 62, right: 18, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0 },
+    xAxis: xAxis(),
+    yAxis: Object.assign({ type: "value", scale: true }, AX),
+    dataZoom: zoom(),
+    series: [
+      { name: "930713 收盘", type: "line", data: D.series.close, showSymbol: false,
+        lineStyle: { width: 1.9, color: "#e8ebf2" }, itemStyle: { color: "#e8ebf2" }, z: 5,
+        markArea: { silent: true, data: stateBands() } },
+      { name: "MA10", type: "line", data: D.series.ma10, showSymbol: false,
+        lineStyle: { width: 1.2, color: "#fbbf24" }, itemStyle: { color: "#fbbf24" } },
+      { name: "MA20", type: "line", data: D.series.ma20, showSymbol: false,
+        lineStyle: { width: 1.2, color: "#60a5fa" }, itemStyle: { color: "#60a5fa" } },
+      { name: "入场", type: "scatter", data: entries, symbol: "triangle", symbolSize: 13,
+        itemStyle: { color: "#34d399", borderColor: "#0e1117", borderWidth: 1 }, z: 10,
+        tooltip: { formatter: p => `入场 ${p.value[0]}<br>价格 ${p.value[1]}` } },
+      { name: "离场", type: "scatter", data: exits, symbol: "triangle", symbolRotate: 180,
+        symbolSize: 13, itemStyle: { color: "#fb923c", borderColor: "#0e1117", borderWidth: 1 }, z: 10,
+        tooltip: { formatter: p => `离场 ${p.value[0]}<br>价格 ${p.value[1]}` } },
+    ],
+  });
+}
+
+function drawScore() {
+  mkChart("chScore", {
+    grid: { left: 40, right: 14, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0,
+              selected: { "趋势": false, "相对动量": false, "广度": false } },
+    xAxis: xAxis(),
+    yAxis: Object.assign({ type: "value", min: 0, max: 100 }, AX),
+    dataZoom: zoom(),
+    series: [
+      { name: "方向分", type: "line", data: D.series.score, showSymbol: false, z: 5,
+        lineStyle: { width: 2, color: "#34d399" }, itemStyle: { color: "#34d399" },
+        areaStyle: { color: "rgba(52,211,153,.06)" },
+        markLine: { silent: true, symbol: "none",
+          label: { color: "#8a94a8", fontSize: 10, position: "insideEndTop" },
+          data: [
+            { yAxis: 60, lineStyle: { color: "rgba(52,211,153,.55)", type: "dashed" }, label: { formatter: "60 入场线" } },
+            { yAxis: 40, lineStyle: { color: "rgba(248,113,113,.55)", type: "dashed" }, label: { formatter: "40 破位线" } },
+          ] } },
+      { name: "趋势", type: "line", data: D.series.trend, showSymbol: false,
+        lineStyle: { width: 1, color: "#fbbf24" }, itemStyle: { color: "#fbbf24" } },
+      { name: "相对动量", type: "line", data: D.series.momentum, showSymbol: false,
+        lineStyle: { width: 1, color: "#a78bfa" }, itemStyle: { color: "#a78bfa" } },
+      { name: "广度", type: "line", data: D.series.breadth, showSymbol: false,
+        lineStyle: { width: 1, color: "#22d3ee" }, itemStyle: { color: "#22d3ee" } },
+    ],
+  });
+}
+
+function drawTemp() {
+  mkChart("chTemp", {
+    grid: { left: 40, right: 14, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0,
+              selected: { "拥挤分位": false, "涨速分位": false } },
+    xAxis: xAxis(),
+    yAxis: Object.assign({ type: "value", min: 0, max: 100 }, AX),
+    dataZoom: zoom(),
+    series: [
+      { name: "温度", type: "line", data: D.series.temp, showSymbol: false, z: 5,
+        lineStyle: { width: 2, color: "#fb923c" }, itemStyle: { color: "#fb923c" },
+        areaStyle: { color: "rgba(251,146,60,.07)" },
+        markLine: { silent: true, symbol: "none",
+          label: { color: "#8a94a8", fontSize: 10, position: "insideEndTop" },
+          data: [
+            { yAxis: 80, lineStyle: { color: "rgba(248,113,113,.6)", type: "dashed" }, label: { formatter: "80 过热" } },
+            { yAxis: 30, lineStyle: { color: "rgba(96,165,250,.55)", type: "dashed" }, label: { formatter: "30 冰点" } },
+          ] } },
+      { name: "拥挤分位", type: "line", data: D.series.crowd_pct, showSymbol: false,
+        lineStyle: { width: 1, color: "#f472b6" }, itemStyle: { color: "#f472b6" } },
+      { name: "涨速分位", type: "line", data: D.series.speed_pct, showSymbol: false,
+        lineStyle: { width: 1, color: "#22d3ee" }, itemStyle: { color: "#22d3ee" } },
+    ],
+  });
+}
+
+function drawRS() {
+  mkChart("chRS", {
+    grid: { left: 56, right: 14, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0 },
+    xAxis: xAxis(),
+    yAxis: Object.assign({ type: "value", scale: true }, AX),
+    dataZoom: zoom(),
+    series: [
+      { name: "RS", type: "line", data: D.series.rs, showSymbol: false,
+        lineStyle: { width: 1.8, color: "#a78bfa" }, itemStyle: { color: "#a78bfa" }, z: 5 },
+      { name: "RS 10日均线", type: "line", data: D.series.rs_ma10, showSymbol: false,
+        lineStyle: { width: 1.2, color: "#60a5fa", type: "dashed" }, itemStyle: { color: "#60a5fa" } },
+    ],
+  });
+}
+
+if (!D) {
+  document.getElementById("app").innerHTML =
+    '<div class="panel" style="color:#f87171">未找到 data.js — 请先运行 update_data.py 生成数据。</div>';
+} else {
+  render();
+}
+</script>
+</body>
+</html>
