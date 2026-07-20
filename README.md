@@ -11,7 +11,7 @@
 ## 在线版 (GitHub Pages, 免费自动更新)
 
 - 网页托管在 GitHub, **不依赖本机开机**, 手机加书签即可随时看; 网址形如 `https://<用户名>.github.io/<仓库名>/`。
-- `.github/workflows/deploy.yml` 每交易日定时 (北京 18:30 / 22:00) 在 GitHub 服务器上跑 `update_data.py` 重算 `data.js`, 连同页面一起发布; 也可在仓库 Actions 页面手动 "Run workflow"。
+- `.github/workflows/deploy.yml` 每个工作日定时 (北京 20:00 / 22:00, 中证官网当日数据约19:30发布, 22:00为兜底) 在 GitHub 服务器上跑 `update_data.py` 重算 `data.js`, 连同页面一起发布; 也可在仓库 Actions 页面手动 "Run workflow"。推送到 main 也会触发重建。
 - 若中证官网从 GitHub 美国服务器不可达, 脚本会自动回退到仓库里缓存的 `data/*.csv`(因此这些缓存需随仓库提交), 页面仍能发布, 只是数据停留在上次成功抓取。
 
 ## 指标体系

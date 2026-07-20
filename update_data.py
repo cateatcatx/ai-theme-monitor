@@ -36,7 +36,13 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+BJT = timezone(timedelta(hours=8))  # 云端runner是UTC, 统一用北京时间
+
+
+def now_bj() -> datetime:
+    return datetime.now(BJT)
 
 import numpy as np
 import pandas as pd
@@ -113,7 +119,7 @@ def fetch_index(code: str, tries: int = 4) -> pd.DataFrame:
             r = requests.get(CSINDEX_URL, params={
                 "indexCode": code,
                 "startDate": START,
-                "endDate": f"{datetime.now():%Y%m%d}",
+                "endDate": f"{now_bj():%Y%m%d}",
             }, headers={"User-Agent": UA, "Referer": "https://www.csindex.com.cn/"},
                 timeout=30)
             r.raise_for_status()
@@ -467,7 +473,7 @@ def export(ind: pd.DataFrame, chain_rows: list, val: dict, trades: list):
         })
 
     payload = {
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": now_bj().strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
         "snapshot": snapshot,
         "series": series,
         "markers": markers,
