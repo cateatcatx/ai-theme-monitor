@@ -6,7 +6,7 @@
 
 - **看指标**: 双击 `index.html` (纯本地页面, 无需服务器)
 - **手动更新**: 双击 `run_update.bat`, 或 `python -X utf8 update_data.py`
-- **自动更新**: Windows计划任务 `AI_Theme_Monitor_Daily` 每个交易日 17:30 运行(仅当天开机在线时执行); 运行日志见 `update.log`
+- **自动更新**: Windows计划任务 `AI_Theme_Monitor_Daily` 每个交易日 20:00 运行(仅当天开机在线时执行); 运行日志见 `update.log`。原定17:30, 实测中证官网当日数据约19:30前后才发布, 故延后
 
 ## 在线版 (GitHub Pages, 免费自动更新)
 
