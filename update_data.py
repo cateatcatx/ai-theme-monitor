@@ -157,6 +157,74 @@ def load_all(no_fetch: bool) -> dict:
     return out
 
 
+# ---------------- 两融(杠杆)数据 ----------------
+
+MARGIN_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+MARGIN_COLS = {
+    "STATISTICS_DATE": "date",
+    "FIN_BALANCE": "fin_balance",        # 融资余额(亿)
+    "LOAN_BALANCE": "loan_balance",      # 融券余额(亿)
+    "FIN_BUY_AMT": "fin_buy",            # 融资买入额(亿)
+    "AVG_GUARANTEE_RATIO": "guarantee",  # 平均维持担保比例(%)
+}
+
+
+def fetch_margin(no_fetch: bool) -> pd.DataFrame:
+    """两融账户统计(证金公司口径, 经东财数据中心API; 行情域名被拦但此域名可用)。
+
+    有缓存时只拉最新一页增量合并; 无缓存时翻页拉全历史。失败回退缓存。
+    """
+    cache = os.path.join(DATA_DIR, "margin.csv")
+    cached = pd.read_csv(cache, parse_dates=["date"]) if os.path.exists(cache) else None
+    if no_fetch and cached is not None:
+        return cached.set_index("date")
+
+    try:
+        rows, page = [], 1
+        while True:
+            r = requests.get(MARGIN_URL, params={
+                "reportName": "RPTA_WEB_MARGIN_DAILYTRADE",
+                "columns": "ALL", "pageSize": 500, "pageNumber": page,
+                "sortColumns": "STATISTICS_DATE", "sortTypes": -1,
+            }, headers={"User-Agent": UA}, timeout=30)
+            r.raise_for_status()
+            result = r.json()["result"]
+            rows.extend(result["data"])
+            if cached is not None or page >= result["pages"]:
+                break  # 已有缓存时只需最新一页做增量
+            page += 1
+            time.sleep(0.4)
+
+        df = pd.DataFrame(rows)[list(MARGIN_COLS)].rename(columns=MARGIN_COLS)
+        df["date"] = pd.to_datetime(df["date"])
+        for c in df.columns[1:]:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+        if cached is not None:
+            df = pd.concat([cached, df], ignore_index=True)
+        df = (df.sort_values("date").drop_duplicates("date", keep="last")
+              .reset_index(drop=True))
+        df.to_csv(cache, index=False)
+        print(f"  两融账户统计: {len(df)}行, 最新 {df['date'].iloc[-1]:%Y-%m-%d}")
+        return df.set_index("date")
+    except Exception as e:
+        if cached is not None:
+            print(f"  [警告] 两融数据拉取失败({e}), 使用本地缓存")
+            return cached.set_index("date")
+        raise RuntimeError(f"两融数据拉取失败且无缓存: {e}")
+
+
+def compute_margin(margin: pd.DataFrame, market: pd.DataFrame) -> pd.DataFrame:
+    """杠杆指标: 两融余额 / 融资买入额占全A成交额(20日平滑)及其1年分位 / 维持担保比例。"""
+    out = pd.DataFrame(index=margin.index)
+    out["balance"] = margin["fin_balance"] + margin["loan_balance"]
+    amt = market["amount_yi"].reindex(margin.index)
+    out["buy_share"] = margin["fin_buy"] / amt * 100
+    out["buy_share_ma20"] = out["buy_share"].rolling(20, min_periods=10).mean()
+    out["buy_share_pct"] = rolling_pctile(out["buy_share_ma20"])
+    out["guarantee"] = margin["guarantee"]
+    return out
+
+
 # ---------------- 指标 ----------------
 
 def rolling_pctile(s: pd.Series, window: int = PCT_WINDOW,
@@ -385,7 +453,8 @@ def series_out(s: pd.Series, n=2):
     return [rnd(v, n) for v in s]
 
 
-def export(ind: pd.DataFrame, chain_rows: list, val: dict, trades: list):
+def export(ind: pd.DataFrame, chain_rows: list, val: dict, trades: list,
+           lev: pd.DataFrame):
     last = ind.iloc[-1]
     prev = ind.iloc[-2]
     score5ago = ind["score"].iloc[-6] if len(ind) > 6 else np.nan
@@ -451,6 +520,27 @@ def export(ind: pd.DataFrame, chain_rows: list, val: dict, trades: list):
         "state": [s if isinstance(s, str) else None for s in view["state"]],
     }
 
+    # 杠杆序列对齐到主日历(两融数据T+1早间发布, 最新1-2日可能缺, 不前向填充以免误导)
+    lev_v = lev.reindex(view.index)
+    series["margin_balance"] = series_out(lev_v["balance"], 0)
+    series["margin_buy_share"] = series_out(lev_v["buy_share_ma20"], 2)
+    series["margin_buy_share_pct"] = series_out(lev_v["buy_share_pct"], 0)
+    series["margin_guarantee"] = series_out(lev_v["guarantee"], 1)
+
+    ml = lev.dropna(subset=["balance"]).iloc[-1]
+    m20 = lev["balance"].dropna()
+    balance_peak = lev["balance"].max()
+    snapshot["margin"] = {
+        "date": lev.index[lev["balance"].notna()][-1].strftime("%Y-%m-%d"),
+        "balance": rnd(ml["balance"], 0),
+        "balance_chg20": rnd(ml["balance"] - m20.iloc[-21], 0) if len(m20) > 21 else None,
+        "from_peak_pct": rnd((ml["balance"] / balance_peak - 1) * 100, 1),
+        "peak_date": lev["balance"].idxmax().strftime("%Y-%m-%d"),
+        "buy_share": rnd(ml["buy_share_ma20"], 2),
+        "buy_share_pct": rnd(ml["buy_share_pct"], 0),
+        "guarantee": rnd(ml["guarantee"], 1),
+    }
+
     first_view = view.index[0]
     markers = []
     for t in trades:
@@ -505,13 +595,16 @@ def main():
     print(">>> 拉取指数数据 (中证指数官网)")
     dfs = load_all(args.no_fetch)
 
+    margin = fetch_margin(args.no_fetch)
+
     print(">>> 计算指标")
     ind = compute(dfs)
     chain_rows = chain_detail(dfs, dfs[MARKET])
     val = validate(ind)
     trades = swing_signals(ind)
+    lev = compute_margin(margin, dfs[MARKET])
 
-    snap = export(ind, chain_rows, val, trades)
+    snap = export(ind, chain_rows, val, trades, lev)
 
     print(">>> 完成. 快照:")
     print(f"  数据截至 {snap['date']}  收盘 {snap['close']} ({snap['chg_pct']:+.2f}%)")
@@ -526,6 +619,11 @@ def main():
               f"已持有{p['hold_days']}日, 浮动{p['ret']:+.1f}%")
     else:
         print("  当前无波段持仓信号")
+    m = snap["margin"]
+    print(f"  杠杆(两融, {m['date']}): 余额{m['balance']:.0f}亿"
+          f" (距{m['peak_date']}峰值{m['from_peak_pct']:+.1f}%, 20日{m['balance_chg20']:+.0f}亿)"
+          f"  融资买入占比{m['buy_share']}% (1年分位{m['buy_share_pct']})"
+          f"  维持担保比例{m['guarantee']}%")
 
     print("\n>>> 波段信号回测 (信号日收盘成交):")
     for since in ("2019-01-01", "2022-01-01"):

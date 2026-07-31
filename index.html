@@ -106,7 +106,7 @@ function deltaTxt(v, suffix){
 }
 
 function render() {
-  const s = D.snapshot, st = STATE_STYLE[s.state];
+  const s = D.snapshot, st = STATE_STYLE[s.state], mg = s.margin;
   document.getElementById("meta").textContent =
     `数据截至 ${s.date} · 页面生成 ${D.updated_at}`;
 
@@ -172,7 +172,7 @@ function render() {
       <div class="sub">RS = 主题指数/沪深300 (x1000) · 站上10日均线 = 波段跑赢</div>
       <div class="chart short" id="chRS"></div>
     </div>
-    <div class="panel" style="margin-bottom:0">
+    <div class="panel" style="margin-bottom:0" id="tradesPanel">
       <h2>波段信号记录 (最近${D.trades.length}笔)</h2>
       <div class="sub">入场: 方向分上穿60且温度&lt;70 · 离场: 方向分&lt;40 或 温度&ge;85且破10日线 · 信号日收盘价计</div>
       <div style="overflow-x:auto; max-height: 232px; overflow-y:auto"><table>
@@ -186,6 +186,20 @@ function render() {
         </tr>`).join("")}
       </table></div>
       ${swingStatsHtml()}
+    </div>
+  </div>
+  <div style="height:14px"></div>
+
+  <div class="grid2">
+    <div class="panel" style="margin-bottom:0">
+      <h2>全市场杠杆 · 两融余额与融资买入占比</h2>
+      <div class="sub">两融数据 ${mg.date} (T+1早间发布, 比行情晚一天) · 余额 <b>${mg.balance.toLocaleString()}亿</b> (距${mg.peak_date.slice(5)}峰值 ${mg.from_peak_pct}%, 20日${mg.balance_chg20 >= 0 ? "+" : ""}${mg.balance_chg20}亿) · 买入占比 ${mg.buy_share}% (1年分位 <b class="${mg.buy_share_pct >= 85 ? "c-red" : mg.buy_share_pct <= 20 ? "c-blue" : "c-muted"}">${mg.buy_share_pct}</b>)</div>
+      <div class="chart short" id="chMargin"></div>
+    </div>
+    <div class="panel" style="margin-bottom:0">
+      <h2>平均维持担保比例 —— 存量账户的安全垫</h2>
+      <div class="sub">全市场两融账户均值, 越低=杠杆越满、离强平越近 · 当前 <b>${mg.guarantee}%</b> (2024/02雪崩前曾至222%, 常态区约250-300%)</div>
+      <div class="chart short" id="chGuarantee"></div>
     </div>
   </div>
   <div style="height:14px"></div>
@@ -235,12 +249,13 @@ function render() {
         <li><b>入场信号:</b> 方向分从下方上穿60, 且当日温度&lt;70 —— 新波段启动且不追已过热的启动。</li>
         <li><b>离场信号:</b> 方向分跌破40(波段破位), 或 温度&ge;85且收盘跌破10日线(过热破线止盈)。</li>
         <li><b>回测画像(2019年来63笔):</b> 胜率约四成, 单笔中位约-1.3%, 但均值+2.5% —— 典型的"小亏多次、大赚几次"趋势跟随画像, 赚钱靠拿住2024/09、2025/07这类大波段, 纪律性执行离场是关键。对T+1收盘成交稳健。</li>
+        <li><b>杠杆维度(全市场背景, 非信号):</b> 两融数据为证金公司口径(经东财数据中心), T+1早间发布。融资买入占比高分位+温度过热 = 杠杆资金在顶部拥挤; 占比低分位+维持担保比例回升 = 去杠杆接近尾声, 利于新波段酝酿。</li>
         <li><b>更新机制:</b> 每个交易日20:00由计划任务自动拉取中证指数官网数据并重算(官网当日数据约19:30前后发布); 偶有延迟则显示T-1。</li>
       </ul>
     </div>
   </div>`;
 
-  drawPrice(); drawScore(); drawTemp(); drawRS();
+  drawPrice(); drawScore(); drawTemp(); drawRS(); drawMargin(); drawGuarantee();
   echarts.connect(charts);
 }
 
@@ -389,6 +404,55 @@ function drawTemp() {
         lineStyle: { width: 1, color: "#f472b6" }, itemStyle: { color: "#f472b6" } },
       { name: "涨速分位", type: "line", data: D.series.speed_pct, showSymbol: false,
         lineStyle: { width: 1, color: "#22d3ee" }, itemStyle: { color: "#22d3ee" } },
+    ],
+  });
+}
+
+function drawMargin() {
+  mkChart("chMargin", {
+    grid: { left: 44, right: 58, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0,
+              selected: { "占比1年分位": false } },
+    xAxis: xAxis(),
+    yAxis: [
+      Object.assign({ type: "value", scale: true, name: "占比%",
+                      nameTextStyle: { color: "#66708a" } }, AX),
+      Object.assign({ type: "value", scale: true, name: "亿元",
+                      nameTextStyle: { color: "#66708a" }, splitLine: { show: false } }, AX),
+    ],
+    dataZoom: zoom(),
+    series: [
+      { name: "融资买入占全A(20日)", type: "line", data: D.series.margin_buy_share,
+        showSymbol: false, connectNulls: true, z: 5,
+        lineStyle: { width: 1.8, color: "#60a5fa" }, itemStyle: { color: "#60a5fa" },
+        areaStyle: { color: "rgba(96,165,250,.07)" } },
+      { name: "两融余额", type: "line", yAxisIndex: 1, data: D.series.margin_balance,
+        showSymbol: false, connectNulls: true,
+        lineStyle: { width: 1.6, color: "#fb923c" }, itemStyle: { color: "#fb923c" } },
+      { name: "占比1年分位", type: "line", data: D.series.margin_buy_share_pct,
+        showSymbol: false, connectNulls: true,
+        lineStyle: { width: 1, color: "#f472b6" }, itemStyle: { color: "#f472b6" } },
+    ],
+  });
+}
+
+function drawGuarantee() {
+  mkChart("chGuarantee", {
+    grid: { left: 48, right: 14, top: 30, bottom: 46 },
+    legend: { textStyle: { color: "#98a2b6" }, top: 0 },
+    xAxis: xAxis(),
+    yAxis: Object.assign({ type: "value", scale: true }, AX),
+    dataZoom: zoom(),
+    series: [
+      { name: "平均维持担保比例%", type: "line", data: D.series.margin_guarantee,
+        showSymbol: false, connectNulls: true, z: 5,
+        lineStyle: { width: 1.8, color: "#34d399" }, itemStyle: { color: "#34d399" },
+        markLine: { silent: true, symbol: "none",
+          label: { color: "#8a94a8", fontSize: 10, position: "insideEndTop" },
+          data: [
+            { yAxis: 240, lineStyle: { color: "rgba(248,113,113,.6)", type: "dashed" },
+              label: { formatter: "240 杠杆偏满" } },
+          ] } },
     ],
   });
 }
